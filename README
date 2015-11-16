@@ -1,0 +1,28 @@
+Files
+==========
+* DIR client
+    * tcpclient.c
+    * tcp_shared.h (SYMLINK)
+    * tcp_shared.c (SYMLINK)
+    * makefile
+* DIR server
+    * tcpserver.c
+    * tcp_shared.h (SYMLINK)
+    * tcp_shared.c (SYMLINK)
+    * makefile
+    * SmallFile.txt (SYMLINK)
+    * MediumFile.pdf (SYMLINK)
+    * LargeFile.mp4 (SYMLINK)
+* tcp_shared.h
+* tcp_shared.c
+* README
+
+Compilation
+===============
+make
+
+Usage
+==========
+tcpclient <HOSTNAME OR IP ADDRESS> <PORT> <FILENAME>
+
+tcpserver <PORT>
