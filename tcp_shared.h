@@ -13,6 +13,14 @@
 
 extern int DEBUG; // flag for whether to print debug statements
 
+enum OPERATION{
+  REQ,
+  UPL,
+  DEL,
+  LIS,
+  XIT,
+};
+
 void analyze_argc( int argc, int argc_expected, void (* print_usage_ptr)() );
 int cmp_MD5_hash( unsigned char MD5_hash1[16], unsigned char MD5_hash2[16] );
 void debugprintf( const char * const format, ... );

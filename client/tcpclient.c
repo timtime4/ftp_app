@@ -21,34 +21,33 @@ int DEBUG = 1; // flag for whether to print debug statements
 
 int connect_to_server( const char * server_hostname, const char * port_str );
 void print_usage( ); // print correct command usage (arguments, etc.)
+void send_operation( int socket_fd, enum OPERATION op );
+void send_file_info( int socket_fd, char * filename);
 
 int main( int argc, char * argv[] )
 {
     // variables and data structures
     const char * server_hostname; // (from command line)
     const char * port_str; // (from command line)
-    const char * filename; // (from command line)
-    unsigned long int filename_len; // length of filename string
+    char filename[25]; // (from command line)
+    char op_str[3];
     int socket_fd; // socket for communicating with server
     long int file_len; // length of file sent by server
     unsigned char MD5_hash_server[16]; // array (NOT STRING) holding hex values for MD5 hash from server
     unsigned char * file_buf = NULL;
     unsigned char * MD5_hash_client[16]; // POINTER to array (NOT STRING) holding hex values for MD5 hash from client (self)
+    enum OPERATION op = REQ;
     FILE * file = NULL;
     struct timeval time_start;
     struct timeval time_end;
     struct timeval time_elapsed;
 
     // get information from command line
-    analyze_argc(argc, 4, &print_usage);
+    analyze_argc(argc, 3, &print_usage);
     server_hostname = argv[1];
     debugprintf("server hostnamename argument: %s", server_hostname);
     port_str = argv[2];
     debugprintf("port argument: %s", port_str);
-    filename = argv[3];
-    debugprintf("filename argument: %s", filename);
-    filename_len = strlen(filename);
-    debugprintf("filename length: %hu", filename_len);
 
     // capture start time
     if (gettimeofday(&time_start, NULL) == -1) {
@@ -64,101 +63,111 @@ int main( int argc, char * argv[] )
         exit(EXIT_FAILURE);
     }
 
-    // send filename length to server
-    uint32_t filename_len_net = htonl(filename_len);
-    send_bytes(socket_fd, &filename_len_net, sizeof(filename_len_net), "filename length");
-    debugprintf("filename length sent to server: %d", filename_len);
+    // Receive operation input
+    while(op != XIT){
+      printf("Please enter an operation:\n");
+      scanf("%s", &op_str);
+      if(strcmp(op_str, "REQ") == 0){
+        op = REQ;
+        send_operation(socket_fd, op);
+      
+        // gather file info & send it
+        printf("Please enter the name of the file you would like to request:\n");
+        scanf("%s", &filename);
+        send_file_info(socket_fd, filename);
 
-    // send filename to server TODO: FIX LATER
-    ssize_t bytes_sent_filename = send(socket_fd, filename, (filename_len + sizeof(char)), 0);
-    if (bytes_sent_filename == -1) {
-        perror("error sending filename to server");
-        close(socket_fd);
-        exit(EXIT_FAILURE);
+        // receive file length from server
+        long int file_len_net;
+        recv_bytes(socket_fd, &file_len_net, sizeof(file_len_net), "file length");
+        file_len = file_len_net;
+        debugprintf("file length received from server: %ld", file_len);
+
+        // quit if file does not exist on server
+        if (file_len == -1) {
+            fprintf(stderr, "File does not exists\n");
+            close(socket_fd);
+            exit(EXIT_SUCCESS);
+        }
+
+        // receive MD5 hash from server
+        recv_bytes(socket_fd, MD5_hash_server, 16, "MD5 hash");
+        debugprintf("MD5 hash received from server");
+
+        // prepare to receive file byte array (packet by packet) from server
+        file_buf = (unsigned char *)malloc(file_len * sizeof(unsigned char));
+        int i_full_pckt;
+        int n_full_pckts = file_len / FILE_PCKT_LEN;
+        size_t last_pckt_len = file_len % FILE_PCKT_LEN;
+        debugprintf("expecting %d full packets from server (%zu bytes)", n_full_pckts, FILE_PCKT_LEN);
+        if (last_pckt_len != 0) {
+            debugprintf("last packet will be %zu bytes", last_pckt_len);
+        } else {
+            debugprintf("no last packet will be received");
+        }
+
+        // recieve full packets from server
+        for (i_full_pckt = 0; i_full_pckt < n_full_pckts; i_full_pckt++) {
+            recv_bytes(socket_fd, &file_buf[i_full_pckt * FILE_PCKT_LEN], FILE_PCKT_LEN, "file packet");
+            debugprintf("full packet %d of %d received from server", (i_full_pckt + 1), n_full_pckts);
+        }
+
+        // receive last packet from server (if necessary)
+        if (last_pckt_len != 0) {
+            recv_bytes(socket_fd, &file_buf[n_full_pckts * FILE_PCKT_LEN], last_pckt_len, "last file packet");
+            debugprintf("last packet received from server");
+        }
+        debugprintf("file received from server");
+
+        // create MD5 hash of file
+        MD5_hash_of_byte_array(file_buf, file_len, MD5_hash_client);
+        debugprintf("MD5 hash created");
+
+        // compare MD5 hashes
+        if (cmp_MD5_hash(*MD5_hash_client, MD5_hash_server) != 0) {
+            fprintf(stderr, "File hashes do not match – bad transfer\n");
+            close(socket_fd);
+            exit(EXIT_FAILURE);
+        }
+        debugprintf("MD5 hashes match"); //TODO: MAKE FAIL!
+
+        // write byte array to file
+        file = fopen(filename, "wb");
+        fwrite(file_buf, 1, file_len, file); //return value!
+        debugprintf("file created, DONE");
+
+        // capture end time
+        if (gettimeofday(&time_end, NULL) == -1) {
+            perror("error getting end time");
+            close(socket_fd);
+            exit(EXIT_FAILURE);
+        }
+        debugprintf("end time recorded");
+
+        // calculate and print time difference and throughput
+        timersub(&time_end, &time_start, &time_elapsed);
+        double seconds_elapsed = time_elapsed.tv_sec + (time_elapsed.tv_usec / 1000000.0);
+        double throughput = ((double)file_len / 1048576) / seconds_elapsed;
+        printf("%ld bytes transferred in %f sec. Throughput: %f Megabytes/sec. File MD5sum: ", file_len, seconds_elapsed, throughput);
+        print_MD5_hash(MD5_hash_client);
+        printf("\n");
+
+      } else if(strcmp(op_str, "UPL") == 0){
+        op = UPL;
+        send_operation(socket_fd, op);
+        printf("Please enter the name of the file you would like to upload:\n");
+      } else if(strcmp(op_str, "DEL") == 0){
+        op = DEL;
+        send_operation(socket_fd, op);
+        printf("Please enter the name of the file you would like to delete:\n");
+      } else if(strcmp(op_str, "LIS") == 0){
+        op = LIS;
+        send_operation(socket_fd, op);
+      } else if(strcmp(op_str, "XIT") == 0){
+        op = XIT;
+        send_operation(socket_fd, op);
+      }
+
     }
-    if (bytes_sent_filename != (filename_len + sizeof(char))) {
-        fprintf(stderr, "error sending filename to server:\n");
-        fprintf(stderr, "    incorrect number of bytes sent, expecting %zu, sent %zd\n", (filename_len + sizeof(char)), bytes_sent_filename);
-        fprintf(stderr, "    exiting now\n");
-        close(socket_fd);
-        exit(EXIT_FAILURE);
-    }
-    debugprintf("filename sent to server: %s", filename);
-
-    // receive file length from server
-    long int file_len_net;
-    recv_bytes(socket_fd, &file_len_net, sizeof(file_len_net), "file length");
-    file_len = file_len_net;
-    debugprintf("file length received from server: %ld", file_len);
-
-    // quit if file does not exist on server
-    if (file_len == -1) {
-        fprintf(stderr, "File does not exists\n");
-        close(socket_fd);
-        exit(EXIT_SUCCESS);
-    }
-
-    // receive MD5 hash from server
-    recv_bytes(socket_fd, MD5_hash_server, 16, "MD5 hash");
-    debugprintf("MD5 hash received from server");
-
-    // prepare to receive file byte array (packet by packet) from server
-    file_buf = (unsigned char *)malloc(file_len * sizeof(unsigned char));
-    int i_full_pckt;
-    int n_full_pckts = file_len / FILE_PCKT_LEN;
-    size_t last_pckt_len = file_len % FILE_PCKT_LEN;
-    debugprintf("expecting %d full packets from server (%zu bytes)", n_full_pckts, FILE_PCKT_LEN);
-    if (last_pckt_len != 0) {
-        debugprintf("last packet will be %zu bytes", last_pckt_len);
-    } else {
-        debugprintf("no last packet will be received");
-    }
-
-    // recieve full packets from server
-    for (i_full_pckt = 0; i_full_pckt < n_full_pckts; i_full_pckt++) {
-        recv_bytes(socket_fd, &file_buf[i_full_pckt * FILE_PCKT_LEN], FILE_PCKT_LEN, "file packet");
-        debugprintf("full packet %d of %d received from server", (i_full_pckt + 1), n_full_pckts);
-    }
-
-    // receive last packet from server (if necessary)
-    if (last_pckt_len != 0) {
-        recv_bytes(socket_fd, &file_buf[n_full_pckts * FILE_PCKT_LEN], last_pckt_len, "last file packet");
-        debugprintf("last packet received from server");
-    }
-    debugprintf("file received from server");
-
-    // create MD5 hash of file
-    MD5_hash_of_byte_array(file_buf, file_len, MD5_hash_client);
-    debugprintf("MD5 hash created");
-
-    // compare MD5 hashes
-    if (cmp_MD5_hash(*MD5_hash_client, MD5_hash_server) != 0) {
-        fprintf(stderr, "File hashes do not match – bad transfer\n");
-        close(socket_fd);
-        exit(EXIT_FAILURE);
-    }
-    debugprintf("MD5 hashes match"); //TODO: MAKE FAIL!
-
-    // write byte array to file
-    file = fopen(filename, "wb");
-    fwrite(file_buf, 1, file_len, file); //return value!
-    debugprintf("file created, DONE");
-
-    // capture end time
-    if (gettimeofday(&time_end, NULL) == -1) {
-        perror("error getting end time");
-        close(socket_fd);
-        exit(EXIT_FAILURE);
-    }
-    debugprintf("end time recorded");
-
-    // calculate and print time difference and throughput
-    timersub(&time_end, &time_start, &time_elapsed);
-    double seconds_elapsed = time_elapsed.tv_sec + (time_elapsed.tv_usec / 1000000.0);
-    double throughput = ((double)file_len / 1048576) / seconds_elapsed;
-    printf("%ld bytes transferred in %f sec. Throughput: %f Megabytes/sec. File MD5sum: ", file_len, seconds_elapsed, throughput);
-    print_MD5_hash(MD5_hash_client);
-    printf("\n");
     close(socket_fd);
     exit(EXIT_SUCCESS);
 }
@@ -211,7 +220,23 @@ int connect_to_server( const char * server_hostname, const char * port_str )
     return -1;
 }
 
-void print_usage( )
-{
-    printf("tcpclient is to be used in the following manner: \"tcpclient <HOSTNAME OR IP ADDRESS> <PORT> <FILENAME>\"\n");
+void print_usage( ) {
+    printf("ftpclient is to be used in the following manner: \"myftp <HOSTNAME OR IP ADDRESS> <PORT>\"\n");
+}
+
+void send_operation( int socket_fd, enum OPERATION op ) {
+  // send operation to the server
+  uint32_t op_net = htonl((unsigned long int)op);
+  send_bytes(socket_fd, &op_net, sizeof(op_net), "operation");
+  debugprintf("operation sent to server: %d", op);
+}
+
+void send_file_info( int socket_fd, char * filename) {
+  // send filename length to server
+  unsigned long int filename_len = strlen(filename);
+  uint32_t filename_len_net = htonl(filename_len);
+  send_bytes(socket_fd, &filename_len_net, sizeof(filename_len_net), "filename length");
+  debugprintf("filename length sent to server: %d", filename_len);
+
+  send_string( socket_fd, filename, "filename" );
 }

@@ -119,3 +119,39 @@ void send_bytes( int socket_fd, void * buf, size_t len, const char * const desc 
         exit(EXIT_FAILURE);
     }
 }
+
+void recv_string( int socket_fd, char * buf, size_t len, const char * const desc ) {
+  ssize_t bytes_recvd = recv(socket_fd, buf, len, 0);
+  if (bytes_recvd == -1) {
+    fprintf(stderr, "error receiving %s\n", desc);
+    perror("exiting now");
+    close(socket_fd);
+    exit(EXIT_FAILURE);
+  }
+  if (bytes_recvd == 0) {
+    fprintf(stderr, "error receiving %s:\n", desc);
+    fprintf(stderr, "    no bytes received\n");
+    fprintf(stderr, "    exiting now\n");
+    close(socket_fd);
+    exit(EXIT_FAILURE);
+  }
+  buf[len-1] = '\0';
+}
+
+void send_string( int socket_fd, char * string, const char * const desc ) {
+    ssize_t bytes_sent = send(socket_fd, string, (strlen(string) + sizeof(char)), 0);
+    if (bytes_sent == -1) {
+      fprintf(stderr, "error sending %s\n", desc);
+      perror("exiting now");
+      close(socket_fd);
+      exit(EXIT_FAILURE);
+    }
+
+    if (bytes_sent != (strlen(string) + sizeof(char))) {
+        fprintf(stderr, "error sending %s:\n", desc);
+        fprintf(stderr, "    incorrect number of bytes sent, expecting %zu, sent %zd\n", (strlen(string) + sizeof(char)), bytes_sent);
+        fprintf(stderr, "    exiting now\n");
+        close(socket_fd);
+        exit(EXIT_FAILURE);
+    }
+}

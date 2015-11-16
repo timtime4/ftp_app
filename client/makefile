@@ -1,7 +1,7 @@
 all:	tcpclient
 
 tcpclient:		tcpclient.o tcp_shared.o
-					gcc tcpclient.o tcp_shared.o -o tcpclient -lmhash
+					gcc tcpclient.o tcp_shared.o -o myftp -lmhash
 
 tcpclient.o:	tcpclient.c
 					gcc -c -g -O -Wall tcpclient.c
