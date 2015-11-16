@@ -17,7 +17,7 @@
 #include "tcp_shared.h" // utility functions
 
 int DEBUG = 1; // flag for whether to print debug statements
-#define FILE_PCKT_LEN 512
+#define FILE_PCKT_LEN 4096
 
 int connect_to_server( const char * server_hostname, const char * port_str );
 void print_usage( ); // print correct command usage (arguments, etc.)
@@ -132,8 +132,8 @@ int main( int argc, char * argv[] )
 
         // write byte array to file
         file = fopen(filename, "wb");
-        fwrite(file_buf, 1, file_len, file); //return value!
-        debugprintf("file created, DONE");
+        size_t write_size = fwrite(file_buf, 1, file_len, file); //return value!
+        debugprintf("file created, DONE %d bytes written", write_size);
 
         // capture end time
         if (gettimeofday(&time_end, NULL) == -1) {
@@ -158,7 +158,45 @@ int main( int argc, char * argv[] )
       } else if(strcmp(op_str, "DEL") == 0){
         op = DEL;
         send_operation(socket_fd, op);
+
+        // gather file info & send it
         printf("Please enter the name of the file you would like to delete:\n");
+        scanf("%s", &filename);
+        send_file_info(socket_fd, filename);
+        
+        // Listen for if file exists
+        uint32_t file_exists_net;
+        recv_bytes(socket_fd, &file_exists_net, sizeof(file_exists_net), "operation");
+        short int file_exists = ntohs(file_exists_net);
+
+        if(file_exists){
+          printf("Are you sure you want to delete %s (Yes/No)?\n", &filename);
+          char confirm_str[3];
+          scanf("%s", &confirm_str);
+          short int confirm;
+          if( strcmp(confirm_str, "Yes") == 0 ){
+            confirm = 1;  
+            debugprintf("file delete sent to client");
+          } else {
+            confirm = 0;
+            printf("Delete abandoned by user!\n");
+          } 
+
+          uint32_t confirm_net;
+          confirm_net = htons(confirm);
+          send_bytes(socket_fd, &confirm_net, sizeof(confirm_net), "confirm delete sent to server");
+          if( confirm ){
+            recv_bytes(socket_fd, &confirm_net, sizeof(confirm_net), "confirm delete from server");
+            confirm = ntohs(confirm_net);
+            if( confirm == 0 ){
+              printf("File was sucessfully deleted from the server\n");
+            } else printf("Error deleting file from the server\n");
+          }
+          
+        } else {
+          debugprintf("Server says file does not exist");
+        }
+
       } else if(strcmp(op_str, "LIS") == 0){
         op = LIS;
         send_operation(socket_fd, op);

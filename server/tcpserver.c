@@ -19,7 +19,7 @@
 int DEBUG = 1; // flag for whether to print debug statements
 #define MAX_PENDING 5
 #define FILENAME_BUF_LEN 1000
-#define FILE_PCKT_LEN 512
+#define FILE_PCKT_LEN 4096
 
 int accept_client_connection( int control_socket_fd, struct sockaddr * client_addr, socklen_t * addr_len );
 int create_control_socket_and_listen( );
@@ -130,6 +130,33 @@ int main( int argc, char * argv[] )
             debugprintf("operation = UPL");
           } else if ( op == DEL ) {
             debugprintf("operation = DEL");
+            receive_file_info(client_socket_fd, filename_buf);
+            
+            // check if file exists
+            short int file_exists = 0;
+            if( access( filename_buf, F_OK ) != -1 ) file_exists = 1;
+
+            uint32_t file_exists_net;
+            file_exists_net = htons(file_exists);
+            send_bytes(client_socket_fd, &file_exists_net, sizeof(file_exists_net), "file exists");
+            debugprintf("file exists status sent to client");
+
+            if( file_exists ) {
+              // Listen for delete confirmation
+              uint32_t confirm_net;
+              recv_bytes(client_socket_fd, &confirm_net, sizeof(confirm_net), "confirm delete from client");
+              short int confirm = ntohs(confirm_net);
+              if( confirm ){
+                debugprintf("Delete the file");
+                confirm = unlink(filename_buf);   // reuse confirm for successful delete flag
+                confirm_net = htons(confirm);
+                send_bytes(client_socket_fd, &confirm_net, sizeof(confirm_net), "confirm delete by server");
+                  
+              } else {
+                debugprintf("Don't delete the file");
+              }
+            }
+            
           } else if ( op == LIS ) {
             debugprintf("operation = LIS");
           } else if ( op == XIT ) {
@@ -230,7 +257,6 @@ void print_usage( )
 void receive_file_info ( int client_socket_fd, char * filename_buf){
   // receive filename length from client
   unsigned long int filename_len; // length of filename sent from client
-  const size_t filename_buf_len = sizeof(filename_buf);
   uint32_t filename_len_net;
   recv_bytes(client_socket_fd, &filename_len_net, sizeof(filename_len_net), "filename length");
   filename_len = ntohl(filename_len_net);
