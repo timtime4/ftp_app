@@ -13,6 +13,8 @@
 
 extern int DEBUG; // flag for whether to print debug statements
 
+#define FILENAME_BUF_LEN 1000
+
 enum OPERATION{
   REQ,
   UPL,
@@ -29,5 +31,7 @@ long int open_filename_to_byte_array( char * filename, unsigned char * * byteArr
 void print_MD5_hash( unsigned char * MD5_hash[16] );
 void recv_bytes( int socket_fd, void * buf, size_t len, const char * const desc );
 void send_bytes( int socket_fd, void * buf, size_t len, const char * const desc );
+void send_file_info( int socket_fd, char * filename);
+void receive_file_info ( int client_socket_fd, char * filename_buf);
 
 #endif //TCP_SHARED_H

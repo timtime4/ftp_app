@@ -155,3 +155,46 @@ void send_string( int socket_fd, char * string, const char * const desc ) {
         exit(EXIT_FAILURE);
     }
 }
+
+void receive_file_info ( int client_socket_fd, char * filename_buf){
+  // receive filename length from client
+  unsigned long int filename_len; // length of filename sent from client
+  uint32_t filename_len_net;
+  recv_bytes(client_socket_fd, &filename_len_net, sizeof(filename_len_net), "filename length");
+  filename_len = ntohl(filename_len_net);
+  debugprintf("filename length received from client: %lu", filename_len);
+
+  // receive filename from client TODO: FIX LATER
+  ssize_t bytes_recvd_filename = recv(client_socket_fd, filename_buf, (filename_len + sizeof(char)), 0);
+  if (bytes_recvd_filename == -1) {
+      perror("error receiving filename from client, exiting now");
+      close(client_socket_fd);
+      exit(EXIT_FAILURE);
+  }
+  if (bytes_recvd_filename != ((filename_len + 1) * sizeof(char))) {
+      fprintf(stderr, "error receiving filename from client:\n");
+      fprintf(stderr, "\tincorrect number of bytes received, expecting %zu, received %zd\n", ((filename_len + 1) * sizeof(char)), bytes_recvd_filename);
+      fprintf(stderr, "\texiting now\n");
+      close(client_socket_fd);
+      exit(EXIT_FAILURE);
+  }
+  filename_buf[FILENAME_BUF_LEN] = '\0';
+  debugprintf("filename received from client: %s", filename_buf);
+
+  // ensure that filename length and length of actual filename match
+  if (filename_len != strlen(filename_buf)) {
+      fprintf(stderr, "filename length and filename from client do not match, exiting now\n");
+      exit(EXIT_FAILURE);
+  }
+  debugprintf("filename length and filename match");
+}
+
+void send_file_info( int socket_fd, char * filename) {
+  // send filename length to server
+  unsigned long int filename_len = strlen(filename);
+  uint32_t filename_len_net = htonl(filename_len);
+  send_bytes(socket_fd, &filename_len_net, sizeof(filename_len_net), "filename length");
+  debugprintf("filename length sent to server: %d", filename_len);
+
+  send_string( socket_fd, filename, "filename" );
+}

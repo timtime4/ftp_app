@@ -12,6 +12,7 @@
 #include <unistd.h>
 #include <errno.h>
 #include <stdlib.h>
+#include <dirent.h>
 // CONST POINTERS?
 
 #include "tcp_shared.h" // utility functions
@@ -19,7 +20,7 @@
 int DEBUG = 1; // flag for whether to print debug statements
 #define MAX_PENDING 5
 #define FILENAME_BUF_LEN 1000
-#define FILE_PCKT_LEN 4096
+#define FILE_PCKT_LEN 1024
 
 int accept_client_connection( int control_socket_fd, struct sockaddr * client_addr, socklen_t * addr_len );
 int create_control_socket_and_listen( );
@@ -38,7 +39,7 @@ int main( int argc, char * argv[] )
     unsigned char * byteArray = NULL; // byte array holding file to send to client
     long int file_len; // length of file to send to client
     unsigned char * MD5_hash[16]; // POINTER to array (NOT STRING) holding hex values for MD5 hash
-    enum OPERATION op = REQ; 
+    enum OPERATION op;
 
     // get information from command line
     analyze_argc(argc, 2, &print_usage);
@@ -61,6 +62,7 @@ int main( int argc, char * argv[] )
         debugprintf("accepted client connection");
 
         // Enter loop to determine operation from client
+        op = REQ; 
         while(op != XIT){
 
           // receive operation from client
@@ -159,6 +161,34 @@ int main( int argc, char * argv[] )
             
           } else if ( op == LIS ) {
             debugprintf("operation = LIS");
+            DIR *dp;
+            struct dirent *ep;  
+        
+            // send over number of files in dir   
+            dp = opendir ("./");
+            short int num_files = 0;
+            if (dp != NULL) {
+              while (ep = readdir (dp)) num_files++;
+              uint32_t num_files_net;
+              num_files_net = htons(num_files);
+              send_bytes(client_socket_fd, &num_files_net, sizeof(num_files_net), "Server sending number of files");
+              
+              (void) closedir (dp);
+            }
+            else perror ("Couldn't open the directory");
+
+            // send over directory listing
+            dp = opendir ("./");
+            if (dp != NULL) {
+              while (ep = readdir (dp)){
+                strcpy(filename_buf, ep->d_name);
+                send_file_info(client_socket_fd, filename_buf);
+              }
+              
+              (void) closedir (dp);
+            }
+            else perror ("Couldn't open the directory");
+            
           } else if ( op == XIT ) {
             debugprintf("operation = XIT");
           }
@@ -254,35 +284,4 @@ void print_usage( )
     printf("ftpserver is to be used in the following manner: \"myftpd <PORT>\"\n");
 }
 
-void receive_file_info ( int client_socket_fd, char * filename_buf){
-  // receive filename length from client
-  unsigned long int filename_len; // length of filename sent from client
-  uint32_t filename_len_net;
-  recv_bytes(client_socket_fd, &filename_len_net, sizeof(filename_len_net), "filename length");
-  filename_len = ntohl(filename_len_net);
-  debugprintf("filename length received from client: %lu", filename_len);
 
-  // receive filename from client TODO: FIX LATER
-  ssize_t bytes_recvd_filename = recv(client_socket_fd, filename_buf, (filename_len + sizeof(char)), 0);
-  if (bytes_recvd_filename == -1) {
-      perror("error receiving filename from client, exiting now");
-      close(client_socket_fd);
-      exit(EXIT_FAILURE);
-  }
-  if (bytes_recvd_filename != ((filename_len + 1) * sizeof(char))) {
-      fprintf(stderr, "error receiving filename from client:\n");
-      fprintf(stderr, "\tincorrect number of bytes received, expecting %zu, received %zd\n", ((filename_len + 1) * sizeof(char)), bytes_recvd_filename);
-      fprintf(stderr, "\texiting now\n");
-      close(client_socket_fd);
-      exit(EXIT_FAILURE);
-  }
-  filename_buf[FILENAME_BUF_LEN] = '\0';
-  debugprintf("filename received from client: %s", filename_buf);
-
-  // ensure that filename length and length of actual filename match
-  if (filename_len != strlen(filename_buf)) {
-      fprintf(stderr, "filename length and filename from client do not match, exiting now\n");
-      exit(EXIT_FAILURE);
-  }
-  debugprintf("filename length and filename match");
-}

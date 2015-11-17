@@ -16,8 +16,9 @@
 
 #include "tcp_shared.h" // utility functions
 
-int DEBUG = 1; // flag for whether to print debug statements
-#define FILE_PCKT_LEN 4096
+int DEBUG = 0; // flag for whether to print debug statements
+#define FILE_PCKT_LEN 1024
+#define FILENAME_BUF_LEN 1000
 
 int connect_to_server( const char * server_hostname, const char * port_str );
 void print_usage( ); // print correct command usage (arguments, etc.)
@@ -29,7 +30,7 @@ int main( int argc, char * argv[] )
     // variables and data structures
     const char * server_hostname; // (from command line)
     const char * port_str; // (from command line)
-    char filename[25]; // (from command line)
+    char filename[FILENAME_BUF_LEN]; // (from command line)
     char op_str[3];
     int socket_fd; // socket for communicating with server
     long int file_len; // length of file sent by server
@@ -200,6 +201,19 @@ int main( int argc, char * argv[] )
       } else if(strcmp(op_str, "LIS") == 0){
         op = LIS;
         send_operation(socket_fd, op);
+              
+        short int num_files;
+        uint32_t num_files_net;        
+        recv_bytes(socket_fd, &num_files_net, sizeof(num_files_net), "client receiving num files");
+        num_files = ntohs(num_files_net);        
+        debugprintf("%d Files in the dir\n", num_files);
+        
+        int i;
+        for(i = 0; i < num_files; i++){
+           receive_file_info ( socket_fd, filename);
+           printf("%s\n", filename);
+        }
+
       } else if(strcmp(op_str, "XIT") == 0){
         op = XIT;
         send_operation(socket_fd, op);
@@ -207,6 +221,7 @@ int main( int argc, char * argv[] )
 
     }
     close(socket_fd);
+    printf("Connection to host closed. Goodbye!\n");
     exit(EXIT_SUCCESS);
 }
 
@@ -267,14 +282,4 @@ void send_operation( int socket_fd, enum OPERATION op ) {
   uint32_t op_net = htonl((unsigned long int)op);
   send_bytes(socket_fd, &op_net, sizeof(op_net), "operation");
   debugprintf("operation sent to server: %d", op);
-}
-
-void send_file_info( int socket_fd, char * filename) {
-  // send filename length to server
-  unsigned long int filename_len = strlen(filename);
-  uint32_t filename_len_net = htonl(filename_len);
-  send_bytes(socket_fd, &filename_len_net, sizeof(filename_len_net), "filename length");
-  debugprintf("filename length sent to server: %d", filename_len);
-
-  send_string( socket_fd, filename, "filename" );
 }
